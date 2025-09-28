@@ -1,94 +1,59 @@
 'use strict';
 
-import * as WEColor from 'WEColor';
-
-// Adding new properties to the editor so you can tweak these values in the editor
 export var scriptProperties = createScriptProperties()
-    .addColor({
-        name: 'minColor',
-        label: 'Minimum Color',
-        value: new Vec3(0, 0, 0) // Default to black
-    })
-    .addColor({
-        name: 'maxColor',
-        label: 'Maximum Color',
-        value: new Vec3(1, 1, 1) // Default to white
-    })
-    .addSlider({
-        name: 'minFrequency',
-        label: 'Minimum Frequency',
-        value: 0,
-        min: 0,
-        max: 31,
-        integer: true
-    })
-    .addSlider({
-        name: 'maxFrequency',
-        label: 'Maximum Frequency',
-        value: 31,
-        min: 0,
-        max: 31,
-        integer: true
-    })
-    .addSlider({
-        name: 'smoothing',
-        label: 'Smoothing',
-        value: 16,
-        min: 0,
-        max: 32,
-        integer: true
-    })
-    .addSlider({
-        name: 'minAudioBounds',
-        label: 'Minimum Audio Bound',
-        value: 0.0,
-        min: 0.0,
-        max: 1.0,
-        integer: false
-    })
-    .addSlider({
-        name: 'maxAudioBounds',
-        label: 'Maximum Audio Bound',
-        value: 1.0,
-        min: 0.0,
-        max: 1.0,
-        integer: false
-    })
-    .addText({
-        name: 'sharedValueName',
-        label: 'Shared Value Name',
-        value: 'sharedColor'
-    })
-    .finish();
+    .addSlider({ name: 'frequencyMin',		label: 'Frequency Min', 		value: 0, 	min: 0,		max: 31, integer: true })
+    .addSlider({ name: 'frequencyMax',		label: 'Frequency Max', 		value: 31, 	min: 0,		max: 31, integer: true })
+    .addSlider({ name: 'smoothing',			label: 'Smoothing (inverted)',	value: 16, 	min: 0,		max: 32, integer: true })
+    .addColor({  name: 'minColor',			label: 'Minimum Color',			value: new Vec3(0, 0, 0) })    
+    .addColor({  name: 'maxColor',			label: 'Maximum Color',			value: new Vec3(1, 1, 1) })
+    .addSlider({ name: 'minAudioBounds',	label: 'Minimum Audio Bound',	value: 0.0, min: 0.0, 	max: 1.0 })
+    .addSlider({ name: 'maxAudioBounds',	label: 'Maximum Audio Bound',	value: 1.0, min: 0.0, 	max: 1.0 })
+    .addCombo({  name: 'audioChannel',		label: 'Audio Channel',         options: [
+              { label: 'Both Channels',		value: 'both'},
+              { label: 'Left Channel',		value: 'left'},
+              { label: 'Right Channel',		value: 'right'}
+    ]})	
+    .addText({ name: 'sharedValueName', label: 'Shared Value Name', value: 'sharedAudioColorValue' })
+.finish();
 
-// This creates a permanent link to the audio response data.
 const audioBuffer = engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_32);
 let smoothValue = 0;
 
-export function update(value) {
-    let audioSum = 0;
-    for (let i = scriptProperties.minFrequency; i <= scriptProperties.maxFrequency; i++) {
-        audioSum += audioBuffer.average[i];
-    }
-    const audioAverage = audioSum / (scriptProperties.maxFrequency - scriptProperties.minFrequency + 1);
+export function update() {
+    const frequencyMin = Math.min(scriptProperties.frequencyMin, scriptProperties.frequencyMax);
+    const frequencyMax = Math.max(scriptProperties.frequencyMin, scriptProperties.frequencyMax);
 
-    // Normalize the audio average within the min and max audio bounds
-    let normalizedAudio = (audioAverage - scriptProperties.minAudioBounds) / (scriptProperties.maxAudioBounds - scriptProperties.minAudioBounds);
-    normalizedAudio = Math.max(0, Math.min(1, normalizedAudio)); // Clamp to [0, 1]
+    let audioAverage = 0;
+    let sampleCount = 0;
+
+    const channel = scriptProperties.audioChannel;
+    const processLeft = channel === 'left' || channel === 'both';
+    const processRight = channel === 'right' || channel === 'both';
+
+    for (let i = frequencyMin; i <= frequencyMax; i++) {
+        let sample = 0;
+        if (processLeft) sample += audioBuffer.left[i];
+        if (processRight) sample += audioBuffer.right[i];
+        if (processLeft && processRight) sample *= 0.5;
+        audioAverage += sample;
+        sampleCount++;
+    }
+
+    if (sampleCount > 0) {
+        audioAverage /= sampleCount;
+    }
+
+    const minAudioBounds = scriptProperties.minAudioBounds;
+    const maxAudioBounds = scriptProperties.maxAudioBounds;
+    let normalizedAudio = (audioAverage - minAudioBounds) / (maxAudioBounds - minAudioBounds);
+    normalizedAudio = Math.max(0, Math.min(1, normalizedAudio));
 
     const audioDelta = normalizedAudio - smoothValue;
     smoothValue += audioDelta * Math.min(1.0, engine.frametime * scriptProperties.smoothing);
     smoothValue = Math.min(1.0, smoothValue);
 
-    const color = scriptProperties.minColor.mix(scriptProperties.maxColor, smoothValue)
+    const resultColor = scriptProperties.minColor.mix(scriptProperties.maxColor, smoothValue);
+    shared[scriptProperties.sharedValueName] = resultColor;
 
-    // Save the color to the shared value
-    shared[scriptProperties.sharedValueName] = color;
-
-    return color;
-}
-
-export function init(value) {
-    // Initialize the smooth value with the starting value if necessary
-    smoothValue = 0;
+    return resultColor;
 }
